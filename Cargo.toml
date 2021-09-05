@@ -1,0 +1,9 @@
+[package]
+name = "jac-reader"
+version = "0.1.0"
+edition = "2018"
+
+[dependencies]
+zip = "0.5"
+png = "0.17.1"
+iced = { version = "0.3", features = ["image"] }
