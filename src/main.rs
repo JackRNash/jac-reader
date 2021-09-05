@@ -1,9 +1,18 @@
 #![forbid(unsafe_code)]
+use iced::image::Handle;
 use iced::{
     executor, Application, Clipboard, Command, Container, Element, Image, Length, Settings,
 };
+use image::io::Reader as ImageReader;
+use image::{
+    DynamicImage, GenericImage, GenericImageView, ImageBuffer, ImageOutputFormat, RgbImage,
+};
 use std::fs::File;
+use std::io::prelude::*;
+use std::io::BufReader;
+use std::io::Cursor;
 use std::path::Path;
+use zip::read::ZipFile;
 
 fn main() {
     let mut unarchived = uncompress(Path::new("redfoo.cbz"));
@@ -28,13 +37,13 @@ fn uncompress(path: &Path) -> zip::ZipArchive<File> {
 // assumes path is a zip
 // TODO: figure out more generic return type
 fn unzip(path: &Path) -> zip::ZipArchive<File> {
-    let unzipped = zip::ZipArchive::new(File::open(path).unwrap()).unwrap();
-    // let mut v: Vec<Box<dyn Read>> = Vec::with_capacity(unzipped.len());
-    // for i in 0..unzipped.len() {
-    //     let file = unzipped.by_index(i).unwrap();
+    let archive = zip::ZipArchive::new(File::open(path).unwrap()).unwrap();
+    // let mut v: Vec<Box<dyn Read>> = Vec::with_capacity(archive.len());
+    // for i in 0..archive.len() {
+    //     let file = archive.by_index(i).unwrap();
     //     v.push(file);
     // }
-    unzipped
+    archive
 }
 
 // assumes path is a rar
@@ -42,17 +51,49 @@ fn unrar(_path: &Path) -> zip::ZipArchive<File> {
     panic!("unimplemented!");
 }
 
-fn parse_png(unarchived: &mut zip::ZipArchive<File>) -> Vec<Vec<u8>> {
-    let mut v: Vec<Vec<u8>> = Vec::with_capacity(unarchived.len());
-    for i in 0..unarchived.len() {
-        let file = unarchived.by_index(i).unwrap();
-        if file.is_file() {
+fn parse_png(archive: &mut zip::ZipArchive<File>) -> Vec<Vec<u8>> {
+    let mut v: Vec<Vec<u8>> = Vec::with_capacity(archive.len());
+    for i in 0..archive.len() {
+        let mut file = archive.by_index(i).unwrap();
+        if file.is_file() && file.name().ends_with(".png") {
             println!("{}", file.name());
-            let decoder = png::Decoder::new(file);
+            let decoder = png::Decoder::new(&mut file);
             let mut reader = decoder.read_info().unwrap();
+            let height = reader.info().height;
+            let width = reader.info().width;
             let mut buf = vec![0; reader.output_buffer_size()];
             reader.next_frame(&mut buf).unwrap();
-            v.push(buf);
+            // v.push(buf);
+            // let height: u32;
+            // let width: u32;
+            // height = 100;
+            // width = 100;
+            {
+                // let decoder = png::Decoder::new(&mut file).read_info().unwrap();
+                // height = info.height;
+                // width = info.width;
+            }
+            // // let reader = decoder.read_info().unwrap();
+
+            // let mut data = Vec::new();
+            // file.read_to_end(&mut data).unwrap();
+            // BufReader::new(file).read_to_end(&mut data).unwrap();
+            println!(
+                "w:{} h:{} expected:{} actual:{}",
+                width,
+                height,
+                width * height,
+                buf.len()
+            );
+            let img: image::RgbImage = ImageBuffer::from_raw(width, height, buf).unwrap();
+
+            let mut cursor = Cursor::new(Vec::new());
+            // img.write_to(&mut cursor, ImageOutputFormat::Png);
+            DynamicImage::ImageRgb8(img)
+                .write_to(&mut cursor, ImageOutputFormat::Png)
+                .expect("Failed to encode image data to memory");
+            // let foo = Handle::from_memory(cursor.into_inner());
+            v.push(cursor.into_inner());
         }
     }
     v
@@ -110,8 +151,8 @@ impl Application for Viewer {
         let handle = match self {
             Viewer::Loaded { comic } => {
                 let page = comic.pages[0].clone();
-                iced::widget::image::Handle::from_pixels(931, 600, page)
-                // iced::widget::image::Handle::from_memory(page[..4000].to_vec())
+                // iced::widget::image::Handle::from_pixels(931, 600, page)
+                iced::widget::image::Handle::from_memory(page)
                 // iced::widget::image::Handle::from("blue.png")
             }
             Viewer::Errored => iced::widget::image::Handle::from_path("error.png"),
