@@ -1,4 +1,6 @@
 #![forbid(unsafe_code)]
+use iced::keyboard::Event::KeyPressed;
+use iced::keyboard::KeyCode;
 use iced::{
     executor, Application, Clipboard, Command, Container, Element, Image, Length, Settings,
     Subscription,
@@ -93,10 +95,10 @@ struct Comic {
 }
 
 #[derive(Debug)]
-enum Viewer {
-    Loading,
-    Loaded { comic: Comic, page: u32 },
-    NoPage,
+struct Viewer {
+    comic: Comic,
+    page: u32,
+    fullscreen: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -114,13 +116,14 @@ impl Application for Viewer {
     fn new(flags: Self::Flags) -> (Viewer, Command<Self::Message>) {
         match flags {
             Message::ComicPage(comic) => (
-                Viewer::Loaded {
+                Viewer {
                     comic: comic,
                     page: 0,
+                    fullscreen: false,
                 },
                 Command::none(),
             ),
-            _ => (Viewer::Loading, Command::none()),
+            _ => panic!("impossible"),
         }
     }
 
@@ -134,6 +137,14 @@ impl Application for Viewer {
         iced_native::subscription::events().map(Message::KeyPress)
     }
 
+    fn mode(&self) -> iced::window::Mode {
+        if self.fullscreen {
+            iced::window::Mode::Fullscreen
+        } else {
+            iced::window::Mode::Windowed
+        }
+    }
+
     fn update(
         &mut self,
         message: Self::Message,
@@ -141,36 +152,36 @@ impl Application for Viewer {
     ) -> Command<Self::Message> {
         match message {
             Message::ComicPage(comic) => {
-                *self = Viewer::Loaded { comic, page: 0 };
+                self.comic = comic;
+                self.page = 0;
                 Command::none()
             }
             Message::BlankPage => Command::none(),
             Message::KeyPress(iced_native::Event::Keyboard(keyevent)) => {
                 match keyevent {
                     // on right press
-                    iced::keyboard::Event::KeyPressed {
-                        key_code: iced::keyboard::KeyCode::Right,
+                    KeyPressed {
+                        key_code: KeyCode::Right,
                         ..
                     } => {
-                        if let Viewer::Loaded { comic, page } = self {
-                            let max_len = u32::try_from(comic.pages.len() - 1).unwrap();
-                            *self = Viewer::Loaded {
-                                comic: comic.clone(),
-                                page: cmp::min(*page + 1, max_len),
-                            };
-                        }
+                        let max_len = u32::try_from(self.comic.pages.len() - 1).unwrap();
+                        self.page = cmp::min(self.page + 1, max_len);
                     }
                     // on left press
-                    iced::keyboard::Event::KeyPressed {
-                        key_code: iced::keyboard::KeyCode::Left,
+                    KeyPressed {
+                        key_code: KeyCode::Left,
                         ..
                     } => {
-                        if let Viewer::Loaded { comic, page } = self {
-                            *self = Viewer::Loaded {
-                                comic: comic.clone(),
-                                page: cmp::max(*page, 1) - 1, // unsigned so have to be careful about overflow in comparison
-                            };
-                        }
+                        // unsigned so have to be careful about overflow in comparison
+                        self.page = cmp::max(self.page, 1) - 1;
+                    }
+                    // on f
+                    KeyPressed {
+                        key_code: KeyCode::F,
+                        ..
+                    } => {
+                        // toggle
+                        self.fullscreen = !self.fullscreen;
                     }
                     // don't care about other button presses
                     _ => (),
@@ -184,14 +195,9 @@ impl Application for Viewer {
     }
 
     fn view(&mut self) -> Element<Self::Message> {
-        let handle = match self {
-            Viewer::Loaded { comic, page } => {
-                let comic_page = comic.pages[*page as usize].clone();
-                iced::widget::image::Handle::from_memory(comic_page)
-            }
-            Viewer::NoPage => iced::widget::image::Handle::from_path("nopage.png"),
-            Viewer::Loading => iced::widget::image::Handle::from_path("loading.png"),
-        };
+        let comic_page = self.comic.pages[self.page as usize].clone();
+        let handle = iced::widget::image::Handle::from_memory(comic_page);
+
         let image = Image::new(handle).width(Length::Fill).height(Length::Fill);
 
         Container::new(image)
