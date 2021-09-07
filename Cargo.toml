@@ -8,3 +8,4 @@ zip = "0.5"
 png = "0.17.1"
 image = "0.23.14"
 iced = { version = "0.3", features = ["image"] }
+iced_native = "0.4"

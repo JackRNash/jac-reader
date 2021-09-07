@@ -1361,6 +1361,7 @@ name = "jac-reader"
 version = "0.1.0"
 dependencies = [
  "iced",
+ "iced_native",
  "image",
  "png 0.17.1",
  "zip",

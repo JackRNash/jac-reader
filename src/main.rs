@@ -1,25 +1,22 @@
 #![forbid(unsafe_code)]
-use iced::image::Handle;
 use iced::{
     executor, Application, Clipboard, Command, Container, Element, Image, Length, Settings,
+    Subscription,
 };
-use image::io::Reader as ImageReader;
-use image::{
-    DynamicImage, GenericImage, GenericImageView, ImageBuffer, ImageOutputFormat, RgbImage,
-};
+use image::{DynamicImage, ImageBuffer, ImageOutputFormat};
+use std::cmp;
+use std::convert::TryFrom;
 use std::fs::File;
-use std::io::prelude::*;
-use std::io::BufReader;
 use std::io::Cursor;
 use std::path::Path;
-use zip::read::ZipFile;
 
 fn main() {
-    let mut unarchived = uncompress(Path::new("redfoo.cbz"));
+    let mut unarchived = uncompress(Path::new("foo123.cbz"));
     let comic = parse_png(&mut unarchived);
-    Viewer::run(Settings::with_flags(ComicMessage::ComicPage(Comic {
+    Viewer::run(Settings::with_flags(Message::ComicPage(Comic {
         pages: comic,
-    })));
+    })))
+    .unwrap();
 }
 
 fn uncompress(path: &Path) -> zip::ZipArchive<File> {
@@ -51,6 +48,9 @@ fn unrar(_path: &Path) -> zip::ZipArchive<File> {
     panic!("unimplemented!");
 }
 
+// TODO: abstract stream logic out, dispatch to parse_png or parse_jpg
+//       based on file type during the stream.
+
 fn parse_png(archive: &mut zip::ZipArchive<File>) -> Vec<Vec<u8>> {
     let mut v: Vec<Vec<u8>> = Vec::with_capacity(archive.len());
     for i in 0..archive.len() {
@@ -63,28 +63,16 @@ fn parse_png(archive: &mut zip::ZipArchive<File>) -> Vec<Vec<u8>> {
             let width = reader.info().width;
             let mut buf = vec![0; reader.output_buffer_size()];
             reader.next_frame(&mut buf).unwrap();
-            // v.push(buf);
-            // let height: u32;
-            // let width: u32;
-            // height = 100;
-            // width = 100;
-            {
-                // let decoder = png::Decoder::new(&mut file).read_info().unwrap();
-                // height = info.height;
-                // width = info.width;
-            }
-            // // let reader = decoder.read_info().unwrap();
 
             // let mut data = Vec::new();
             // file.read_to_end(&mut data).unwrap();
-            // BufReader::new(file).read_to_end(&mut data).unwrap();
-            println!(
-                "w:{} h:{} expected:{} actual:{}",
-                width,
-                height,
-                width * height,
-                buf.len()
-            );
+            // println!(
+            //     "w:{} h:{} expected:{} actual:{}",
+            //     width,
+            //     height,
+            //     width * height,
+            //     buf.len() / 3 // 3 channels
+            // );
             let img: image::RgbImage = ImageBuffer::from_raw(width, height, buf).unwrap();
 
             let mut cursor = Cursor::new(Vec::new());
@@ -107,30 +95,43 @@ struct Comic {
 #[derive(Debug)]
 enum Viewer {
     Loading,
-    Loaded { comic: Comic },
-    Errored,
+    Loaded { comic: Comic, page: u32 },
+    NoPage,
 }
 
 #[derive(Debug, Clone)]
-enum ComicMessage {
+enum Message {
     ComicPage(Comic),
     BlankPage,
+    KeyPress(iced_native::Event),
 }
 
 impl Application for Viewer {
     type Executor = executor::Default;
-    type Message = ComicMessage;
-    type Flags = ComicMessage;
+    type Message = Message;
+    type Flags = Message;
 
     fn new(flags: Self::Flags) -> (Viewer, Command<Self::Message>) {
         match flags {
-            ComicMessage::ComicPage(comic) => (Viewer::Loaded { comic: comic }, Command::none()),
-            ComicMessage::BlankPage => (Viewer::Loading, Command::none()),
+            Message::ComicPage(comic) => (
+                Viewer::Loaded {
+                    comic: comic,
+                    page: 0,
+                },
+                Command::none(),
+            ),
+            _ => (Viewer::Loading, Command::none()),
         }
     }
 
     fn title(&self) -> String {
         String::from("JAC Reader")
+    }
+
+    fn subscription(&self) -> Subscription<Message> {
+        // TODO: find way to just get keyboard / key press events
+        //       current method causes tons of uneccessary redraws
+        iced_native::subscription::events().map(Message::KeyPress)
     }
 
     fn update(
@@ -139,23 +140,56 @@ impl Application for Viewer {
         _clipboard: &mut Clipboard,
     ) -> Command<Self::Message> {
         match message {
-            ComicMessage::ComicPage(comic) => {
-                *self = Viewer::Loaded { comic };
+            Message::ComicPage(comic) => {
+                *self = Viewer::Loaded { comic, page: 0 };
                 Command::none()
             }
-            ComicMessage::BlankPage => Command::none(),
+            Message::BlankPage => Command::none(),
+            Message::KeyPress(iced_native::Event::Keyboard(keyevent)) => {
+                match keyevent {
+                    // on right press
+                    iced::keyboard::Event::KeyPressed {
+                        key_code: iced::keyboard::KeyCode::Right,
+                        ..
+                    } => {
+                        if let Viewer::Loaded { comic, page } = self {
+                            let max_len = u32::try_from(comic.pages.len() - 1).unwrap();
+                            *self = Viewer::Loaded {
+                                comic: comic.clone(),
+                                page: cmp::min(*page + 1, max_len),
+                            };
+                        }
+                    }
+                    // on left press
+                    iced::keyboard::Event::KeyPressed {
+                        key_code: iced::keyboard::KeyCode::Left,
+                        ..
+                    } => {
+                        if let Viewer::Loaded { comic, page } = self {
+                            *self = Viewer::Loaded {
+                                comic: comic.clone(),
+                                page: cmp::max(*page, 1) - 1, // unsigned so have to be careful about overflow in comparison
+                            };
+                        }
+                    }
+                    // don't care about other button presses
+                    _ => (),
+                }
+                Command::none()
+            }
+
+            // not using any other events for now (mouse move etc)
+            _ => Command::none(),
         }
     }
 
     fn view(&mut self) -> Element<Self::Message> {
         let handle = match self {
-            Viewer::Loaded { comic } => {
-                let page = comic.pages[0].clone();
-                // iced::widget::image::Handle::from_pixels(931, 600, page)
-                iced::widget::image::Handle::from_memory(page)
-                // iced::widget::image::Handle::from("blue.png")
+            Viewer::Loaded { comic, page } => {
+                let comic_page = comic.pages[*page as usize].clone();
+                iced::widget::image::Handle::from_memory(comic_page)
             }
-            Viewer::Errored => iced::widget::image::Handle::from_path("error.png"),
+            Viewer::NoPage => iced::widget::image::Handle::from_path("nopage.png"),
             Viewer::Loading => iced::widget::image::Handle::from_path("loading.png"),
         };
         let image = Image::new(handle).width(Length::Fill).height(Length::Fill);
