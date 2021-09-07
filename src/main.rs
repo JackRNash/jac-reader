@@ -203,8 +203,24 @@ impl Application for Viewer {
         Container::new(image)
             .width(Length::Fill)
             .height(Length::Fill)
+            .style(style::Container)
             .center_x()
             .center_y()
             .into()
+    }
+}
+
+mod style {
+    use iced::{container, Color};
+
+    pub struct Container;
+
+    impl container::StyleSheet for Container {
+        fn style(&self) -> container::Style {
+            container::Style {
+                background: Color::from_rgb8(0x36, 0x39, 0x3F).into(),
+                ..container::Style::default()
+            }
+        }
     }
 }
