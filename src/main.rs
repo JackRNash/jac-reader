@@ -132,9 +132,11 @@ impl Application for Viewer {
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        // TODO: find way to just get keyboard / key press events
-        //       current method causes tons of uneccessary redraws
-        iced_native::subscription::events().map(Message::KeyPress)
+        let fun = |event: iced_native::Event, _status: iced_native::event::Status| match event {
+            iced_native::Event::Keyboard { .. } => Some(Message::KeyPress(event)),
+            _ => None,
+        };
+        iced_native::subscription::events_with(fun)
     }
 
     fn mode(&self) -> iced::window::Mode {
